@@ -1,0 +1,378 @@
+---
+title: "Acoustic Array Configuration Testing"
+author: "David Borchers"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r packages, warning=FALSE,echo=FALSE,message=FALSE}
+require(kableExtra)
+require(secr)
+```
+
+
+```{r simsetup, message=FALSE, echo=FALSE}
+#traps <- expand.grid(x = 1:5,y = 1:5) # arbitrary 5 x 5 array used for testing code
+dtrap = 530 # shortest distance between traps in the cross design
+traps7loc = data.frame(x=c(0,-dtrap,0,dtrap,0,-2*dtrap,2*dtrap),
+                   y=c(dtrap,0,-dtrap,0,0,0,0))
+g0 = 1
+sigma = c(500,1000)
+nsigma = length(sigma)
+
+buffer = 4*max(sigma)
+
+# Turn traps and mask into secr objects 
+traps7 = read.traps(data=traps7loc, detector="proximity")
+mask = make.mask(traps7,buffer=buffer)
+
+xlim = range(mask$x)
+ylim = range(mask$y)
+
+#trapdists = edist(traps7,traps7) # distance between traps
+
+A = dim(mask)[1]*attributes(mask)$area
+Nperarray = 33 # number of animals per array
+narrays = 11 # number of arrays deployed
+N = Nperarray*narrays
+D = N/A 
+
+ncalls = 5 # number of calls per animal
+Ncall = N*ncalls
+
+nsim = 50 # number of simulations
+```
+
+In the absence of better information, density was chosen to give what looks like a believable number of calling groups per square kilometre.
+
+```{r userfuns, echo=FALSE}
+# User-defined functions
+
+# Function to plot population, detectors, detected animal locations, and which detectors detected them.
+plot.ch = function(ch,traps,popn,...) {
+  caught = sort(which(is.element(row.names(popn),row.names(ch))))
+  plot(traps$x,traps$y,col=0,xlim=xlim,ylim=ylim,xlab="",ylab="",...)
+  text(popn[,1],popn[,2],labels=row.names(popn),cex=0.5,col="red") # plot all animals
+  points(popn[caught,1], # plot animals caught 
+         popn[caught,2],col="red",cex=1.5)
+  n = dim(ch)[1] # number of animals detected
+  ncalls = dim(ch)[2] # number of cals per animal ("occasions' in secr-speak)
+  for(i in 1:n) {
+    for(call in 1:ncalls) {
+      trapnum = which(ch[i,call,]>0)
+      if(length(trapnum)>0) { # animal was detected on this occasion
+        popnum = which(row.names(popn)==row.names(ch)[i])
+        for(k in 1:length(trapnum)) {
+          segments(popn[popnum,1],
+                   popn[popnum,2],
+                   traps$x[trapnum[k]], traps$y[trapnum[k]],
+                   col="gray")
+        }
+      }
+    }
+  }
+  text(traps$x,traps$y,labels=trapno)
+}
+```
+
+# Survey Simulation Setup
+
+Let $\mathbf{s}=(x,y)$ be a generic activity centre location, $(u,v)$ be a detector location and $p(d) = g_0\frac{-d^2}{2\sigma^2} = g_0\frac{-((x-u)^2+(y-v)^2)}{2\sigma^2}$ be the detection function evaluated at distance $d=\sqrt{(x-u)^2+(y-v)^2}$ from the activity centre, where $g_0$ and $\sigma$ are the detection function parameters.
+
+The probability of detection at distance zero from a detector is assumed to be 1, i.e., we assume that $p(0)=g_0=1$.
+
+We have $N$ activity centres, in a region of area $A$ that includes the trap array at its centre. Activity centres are assumed to be evenly distributed in the survey region (created with the `secr` function `sim.popn`, with argument `model2D="even").
+
+Each activity centre is assumed to emit $n_c=`r ncalls`$ calls.
+
+We consider estimation with either arrays of 7 detectors or arrays of 5 detectors, with about the same total number of detectors in each case - see below for detector layouts.
+
+We consider scenarios in which the half-normal detection function range parameter $\sigma$ is either `r sigma[1]`m or `r sigma[2]`m.
+
+To evaluate the designs, we look at the bias and the std. deviation of estimates of total number of calls.
+
+# 7-array simulations
+
+The key parameter values are as follows:
+
+* $\sigma = `r sigma[1]`$,
+* $g0 = `r g0`$,
+* The surface area of the area around a single array is `r A`,
+* The number of 7-element arrays used is `r narrays`,
+* The total number of animals across all arrays $N = `r N`$,
+* The number of calls per animal is $n_c = `r ncalls`$,
+* True number of calls is $N_{call} = `r N*ncalls`$,
+* The mask buffer is `r buffer`,
+* The number of simulations is `r nsim`.
+
+Let's take a look at the traps:
+
+```{r traplot, fig.dim=c(6,6), echo=FALSE}
+ntraps = dim(traps7)[1]
+trapno = 1:ntraps
+plot(traps7$x,traps7$y,col=0,xlim=xlim,ylim=xlim,
+     xlab="",ylab="",main="Traps",cex.main=0.75)
+text(traps7$x,traps7$y,labels=trapno)
+```
+
+Now try simulate a single survey and plot the population and captures for a single array, to give a feel for what the simulation scenario looks like. We dco this for each candidate $\sigma$.
+
+```{r simfixedN, echo=FALSE}
+set.seed(182764)
+popn = sim.popn(mask=mask, D=D, Ndist="fixed", model2D="even", core=attributes(mask)$boundingbox, buffer=0)
+```
+
+Captures for all arrays:
+
+```{r plotcapts1, fig.dim=c(6,6), echo=FALSE}
+signo = 1
+ch = sim.capthist(traps=traps7, popn=popn, detectfn=0, detectpar=list(g0=1, sigma=sigma[signo]),
+                  noccasions=ncalls, nsessions=1, renumber=FALSE)
+plot.ch(ch,traps7,popn,
+        main=paste("All arrays, 7-element array, sigma=",sigma[signo],"; ",ncalls," calls per animal.",sep=""))
+```
+
+Example captures from a single array:
+
+```{r plotpopcapts1.single, fig.dim=c(6,6), echo=FALSE}
+set.seed(999)
+# systematic choice of animals corresponding to a single array:
+start = sample(narrays,1) # random start point
+keep1 = seq(start,start+(Nperarray-1)*narrays,narrays) # take every narrays element from start point
+# jitter the sequence of kept animals to prevent diagonal bands appearing:
+keep = keep1 + sample(-2:2,length(keep1),replace=TRUE)
+# reset whichever elements are negative or greater than max in pop
+keep[keep<1] = keep1[keep<1]
+keep[keep>dim(popn)[1]] = keep1[keep>dim(popn)[1]]
+pop1 = popn[keep,] # select members of population to associate with single array
+ch1 = ch[is.element(row.names(ch),row.names(pop1)),,]
+plot.ch(ch1,traps7,pop1,
+        main=paste("Single array, 7-element array, sigma=",sigma[signo],"; ",ncalls," calls per animal.",sep=""))
+```
+
+All arrays:
+
+```{r plotcapts2, fig.dim=c(6,6), echo=FALSE}
+signo = 2
+ch = sim.capthist(traps=traps7, popn=popn, detectfn=0, detectpar=list(g0=1, sigma=sigma[signo]),
+                  noccasions=ncalls, nsessions=1, renumber=FALSE)
+plot.ch(ch,traps7,popn,
+        main=paste("All arrays, 7-element array, sigma=",sigma[signo],"; ",ncalls," calls per animal.",sep=""))
+```
+
+Single array.
+
+```{r plotpopcapts2.single, fig.dim=c(6,6), echo=FALSE}
+ch1 = ch[is.element(row.names(ch),row.names(pop1)),,]
+plot.ch(ch1,traps7,pop1,
+        main=paste("Single array, 7-element array, with sigma=",sigma[signo],"; ",ncalls," calls per animal.",sep=""))
+```
+
+
+Simulate population and survey, and look at distribution of estimates of number of calls, number of groups detected, and number of calls detected, across all the arrays.
+
+```{r secrsim7, warning=FALSE, echo=FALSE}
+set.seed(1827)
+Nhat.secr = sighat.secr = Ngrp.secr = Ndet.secr = matrix(rep(NA,nsim*nsigma),nrow=nsim)
+for(signo in 1:nsigma) {
+  for(i in 1:nsim) {
+    # Simulate a population with a fixed number of animals
+    popn = sim.popn(mask=mask, D=D, Ndist="fixed", model2D="even", core=attributes(mask)$boundingbox, buffer=0)
+    # Simulate detection histories based on the simulated population
+    ch = sim.capthist(traps=traps7, popn=popn, detectfn=0, detectpar=list(g0=1, sigma=sigma[signo]),
+                           noccasions=5, nsessions=1) 
+    fit = secr.fit(ch,mask=mask,fixed=list(g0=1),trace=FALSE)
+    fitsum = summary(fit)
+    chsum = summary(ch)
+    Nhat.secr[i,signo] = fitsum$predicted$estimate[1] * fitsum$mask$Area
+    sighat.secr[i,signo] = fitsum$predicted$estimate[2]
+    Ngrp.secr[i,signo] = chsum$counts[1,ncalls+1]
+    Ndet.secr[i,signo] = chsum$counts[6,ncalls+1]
+  }
+}
+```
+
+
+```{r sumtab7, echo=FALSE}
+totA = A * narrays # total area of all arrays
+Nhat.mean=round(apply(Nhat.secr*ncalls,2,mean))
+Nhat.pcbias = round(100*(Nhat.mean-Ncall)/Ncall,2)
+Nhat.pcCV=round(100*apply(Nhat.secr*ncalls,2,sd)/Nhat.mean)
+Dhat.mean = round(1000*Nhat.mean/totA)
+Dhat.pcbias=Nhat.pcbias
+Dhat.pcCV = Nhat.pcCV
+sighat.mean=round(apply(sighat.secr,2,mean))
+sighat.pcbias = round(100*(sighat.mean-sigma)/sigma,2)
+sighat.pcCV=round(100*apply(sighat.secr,2,sd)/sighat.mean)
+Ngrp.mean=round(apply(Ngrp.secr,2,mean))
+Ngrp.pcCV=round(100*apply(Ngrp.secr,2,sd)/Ngrp.mean)
+Ndet.mean=round(apply(Ndet.secr,2,mean))
+Ndet.pcCV=round(100*apply(Ndet.secr,2,sd)/Ndet.mean)
+estsum = data.frame(
+  Mean.sigma1=c(Dhat.mean[1],sighat.mean[1],Ngrp.mean[1],Ndet.mean[1]), 
+  pcBias.sigma1=c(Dhat.pcbias[1],sighat.pcbias[1],NA,NA), 
+  pcCV.sigma1=c(Dhat.pcCV[1],sighat.pcCV[1],Ngrp.pcCV[1],Ndet.pcCV[1]),
+  Mean.sigma2=c(Dhat.mean[2],sighat.mean[2],Ngrp.mean[2],Ndet.mean[2]), 
+  pcBias.sigma2=c(Dhat.pcbias[2],sighat.pcbias[2],NA,NA), 
+  pcCV.sigma2=c(Dhat.pcCV[2],sighat.pcCV[2],Ngrp.pcCV[2],Ndet.pcCV[2])
+)
+row.names(estsum) = c("Dcall","sigma","Ngrpdet","Ncalldet")
+tab1 = kable(estsum, booktabs = TRUE, caption="Mean and %bias of call density estimates and sigma, at each sigma level for 7-trap arrays, with associated %CV. Dcall 1000x is estimated call density, sigma is estimated sigma, Ngrpdet is number of groups detected, Ncalldet is number of calls detected. Extensions .sigma1 and .sigma2 indicate the two sigma levels.")
+```
+
+
+# 5-Element Array Simulations
+
+Now repeat with a 5-element trap array
+
+```{r resetarraynum, echo=FALSE}
+narrays = 15 # number of arrays deployed
+N = Nperarray*narrays
+D = N/A 
+Ncall = N*ncalls
+```
+
+The key parameter values are as follows:
+
+* $\sigma = `r sigma[2]`$,
+* $g0 = `r g0`$,
+* The surface area of the area around a single array is `r A`,
+* The number of 5-element arrays used is `r narrays`,
+* The total number of animals across all arrays $N = `r N`$,
+* The number of calls per animal is $n_c = `r ncalls`$,
+* True number of calls is $N_{call} = `r N*ncalls`$,
+* The mask buffer is `r buffer`
+* The number of simulations is `r nsim`
+
+```{r traps5, echo=FALSE}
+# create 5-element traps object from 7-element traps coordinates
+traps5 = read.traps(data=traps7loc[-c(6,7),], detector="proximity") 
+```
+
+Let's take a look at the traps:
+
+```{r traplot5, fig.dim=c(6,6), echo=FALSE}
+ntraps = dim(traps5)[1]
+trapno = 1:ntraps
+plot(traps5$x,traps5$y,col=0,xlim=xlim,ylim=xlim,
+     xlab="",ylab="",main="Traps",cex.main=0.75)
+text(traps5$x,traps5$y,labels=trapno)
+```
+
+```{r simfixedN5, echo=FALSE}
+set.seed(1827)
+popn = sim.popn(mask=mask, D=D, Ndist="fixed", model2D="even", core=attributes(mask)$boundingbox, buffer=0)
+```
+
+Look at captures over all arrays
+
+```{r plotcapts15, fig.dim=c(6,6), echo=FALSE}
+signo = 1
+ch = sim.capthist(traps=traps5, popn=popn, detectfn=0, detectpar=list(g0=1, sigma=sigma[signo]),
+                  noccasions=ncalls, nsessions=1, renumber=FALSE)
+plot.ch(ch,traps5,popn,
+        main=paste("All arrays, 5-element array, sigma=",sigma[signo],"; ",ncalls," calls per animal.",sep=""))
+```
+
+Then look at a single array captures:
+
+```{r plotpopcapts1.single5, fig.dim=c(6,6), echo=FALSE}
+set.seed(999)
+# systematic choice of animals corresponding to a single array:
+start = sample(narrays,1) # random start point
+keep = seq(start,start+(Nperarray-1)*narrays,narrays) # take every narrays element from start point
+keep1 = seq(start,start+(Nperarray-1)*narrays,narrays) # take every narrays element from start point
+# jitter the sequence of kept animals to prevent diagonal bands appearing:
+keep = keep1 + sample(-2:2,length(keep1),replace=TRUE)
+# reset whichever elements are negative or greater than max in pop
+keep[keep<1] = keep1[keep<1]
+keep[keep>dim(popn)[1]] = keep1[keep>dim(popn)[1]]
+pop1 = popn[keep,]
+ch1 = ch[is.element(row.names(ch),row.names(pop1)),,]
+plot.ch(ch1,traps5,pop1,
+        main=paste("Single array, 5-element array, sigma=",sigma[signo],"; ",ncalls," calls per animal.",sep=""))
+```
+
+All arrays:
+
+```{r plotcapts25, fig.dim=c(6,6), echo=FALSE}
+signo = 2
+ch = sim.capthist(traps=traps5, popn=popn, detectfn=0, detectpar=list(g0=1, sigma=sigma[signo]),
+                  noccasions=ncalls, nsessions=1, renumber=FALSE)
+plot.ch(ch,traps5,popn,
+        main=paste("All arrays, 5-element array, sigma=",sigma[signo],"; ",ncalls," calls per animal.",sep=""))
+```
+
+Example single array:
+
+```{r plotpopcapts2.single5, fig.dim=c(6,6), echo=FALSE}
+ch1 = ch[is.element(row.names(ch),row.names(pop1)),,]
+plot.ch(ch1,traps5,pop1,
+        main=paste("Single array, 5-element array, sigma=",sigma[signo],"; ",ncalls," calls per animal.",sep=""))
+```
+
+
+```{r secrsim5, warning=FALSE, echo=FALSE}
+set.seed(1827)
+Nhat.secr = sighat.secr = Ngrp.secr = Ndet.secr = matrix(rep(NA,nsim*nsigma),nrow=nsim)
+for(signo in 1:nsigma) {
+  for(i in 1:nsim) {
+    # Simulate a population with a fixed number of animals
+    popn = sim.popn(mask=mask, D=D, Ndist="fixed", model2D="even", core=attributes(mask)$boundingbox, buffer=0)
+    # Simulate detection histories based on the simulated population
+    ch = sim.capthist(traps=traps7, popn=popn, detectfn=0, detectpar=list(g0=1, sigma=sigma[signo]),
+                           noccasions=5, nsessions=1) 
+    fit = secr.fit(ch,mask=mask,fixed=list(g0=1),trace=FALSE)
+    fitsum = summary(fit)
+    chsum = summary(ch)
+    Nhat.secr[i,signo] = fitsum$predicted$estimate[1] * fitsum$mask$Area
+    sighat.secr[i,signo] = fitsum$predicted$estimate[2]
+    Ngrp.secr[i,signo] = chsum$counts[1,ncalls+1]
+    Ndet.secr[i,signo] = chsum$counts[6,ncalls+1]
+  }
+}
+```
+
+
+```{r sumtab5, echo=FALSE}
+totA = A * narrays # total area of all arrays
+Nhat.mean=round(apply(Nhat.secr*ncalls,2,mean))
+Nhat.pcbias = round(100*(Nhat.mean-Ncall)/Ncall,2)
+Nhat.pcCV=round(100*apply(Nhat.secr*ncalls,2,sd)/Nhat.mean)
+Dhat.mean = round(1000*Nhat.mean/totA)
+Dhat.pcbias=Nhat.pcbias
+Dhat.pcCV = Nhat.pcCV
+sighat.mean=round(apply(sighat.secr,2,mean))
+sighat.pcbias = round(100*(sighat.mean-sigma)/sigma,2)
+sighat.pcCV=round(100*apply(sighat.secr,2,sd)/sighat.mean)
+Ngrp.mean=round(apply(Ngrp.secr,2,mean))
+Ngrp.pcCV=round(100*apply(Ngrp.secr,2,sd)/Ngrp.mean)
+Ndet.mean=round(apply(Ndet.secr,2,mean))
+Ndet.pcCV=round(100*apply(Ndet.secr,2,sd)/Ndet.mean)
+estsum = data.frame(
+  Mean.sigma1=c(Dhat.mean[1],sighat.mean[1],Ngrp.mean[1],Ndet.mean[1]), 
+  pcBias.sigma1=c(Dhat.pcbias[1],sighat.pcbias[1],NA,NA), 
+  pcCV.sigma1=c(Dhat.pcCV[1],sighat.pcCV[1],Ngrp.pcCV[1],Ndet.pcCV[1]),
+  Mean.sigma2=c(Dhat.mean[2],sighat.mean[2],Ngrp.mean[2],Ndet.mean[2]), 
+  pcBias.sigma2=c(Dhat.pcbias[2],sighat.pcbias[2],NA,NA), 
+  pcCV.sigma2=c(Dhat.pcCV[2],sighat.pcCV[2],Ngrp.pcCV[2],Ndet.pcCV[2])
+)
+row.names(estsum) = c("Dcall","sigma","Ngrpdet","Ncalldet")
+tab2 = kable(estsum, booktabs = TRUE, caption="Mean and %bias of call density estimates and sigma, at each sigma level for 5-trap arrays, with associated %CV. Dcall 1000x is estimated call density, sigma is estimated sigma, Ngrpdet is number of groups detected, Ncalldet is number of calls detected. Extensions .sigma1 and .sigma2 indicate the two sigma levels.")
+```
+
+# Summary of estimates
+Summary of mean and \% bias of estimate of total number of calls made during the survey, across all detector arrays,and estimated $\sigma$, together with mean number of groups detected and mean number of calls detected, for each level of $\sigma$. Results are from `r nsim` simulations.
+
+```{r estsum1, echo=FALSE}
+tab1
+```
+
+```{r estsum2, echo=FALSE}
+tab2
+```
