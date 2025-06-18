@@ -16,16 +16,32 @@ require(secr)
 ```
 
 
+Set up and plot the detection functions from which to simulate:
+
+```{r detfuns}
+# parameters for half-normal detection function
+detfun = "HN"
+g0 = 1
+sigma = c(500,1000)
+
+# parameters for hazard half-normal detection function
+detfun = "HHN"
+l0 = c(22,84)
+sigma = c(350,500)
+
+if(detfun=="HN") detpar = list(list(g0=g0, sigma=sigma[1]),list(g0=g0, sigma=sigma[2]))
+if(detfun=="HHN") detpar = list(list(lambda0=l0[1], sigma=sigma[1]),list(lambda0=l0[2], sigma=sigma[2]))
+
+nsigma = length(sigma)
+```
+
 ```{r simsetup, message=FALSE, echo=FALSE}
 #traps <- expand.grid(x = 1:5,y = 1:5) # arbitrary 5 x 5 array used for testing code
 dtrap = 530 # shortest distance between traps in the cross design
 traps7loc = data.frame(x=c(0,-dtrap,0,dtrap,0,-2*dtrap,2*dtrap),
                    y=c(dtrap,0,-dtrap,0,0,0,0))
-g0 = 1
-sigma = c(500,1000)
-nsigma = length(sigma)
 
-buffer = 4*max(sigma)
+buffer = 4000
 
 # Turn traps and mask into secr objects 
 traps7 = read.traps(data=traps7loc, detector="proximity")
@@ -36,16 +52,20 @@ ylim = range(mask$y)
 
 #trapdists = edist(traps7,traps7) # distance between traps
 
-A = dim(mask)[1]*attributes(mask)$area
+# Calculate total mask area
+bbox = attributes(mask)$boundingbox
+A = diff(range(bbox$x)) * diff(range(bbox$y)) # in square metres
+A = A/10000 # in hectares - which is what secr works in 
+
 Nperarray = 33 # number of animals per array
 narrays = 11 # number of arrays deployed
 N = Nperarray*narrays
-D = N/A 
+D = N/A # area of all arrays
 
 ncalls = 5 # number of calls per animal
 Ncall = N*ncalls
 
-nsim = 50 # number of simulations
+nsim = 3 # number of simulations
 ```
 
 In the absence of better information, density was chosen to give what looks like a believable number of calling groups per square kilometre.
@@ -92,16 +112,16 @@ Each activity centre is assumed to emit $n_c=`r ncalls`$ calls.
 
 We consider estimation with either arrays of 7 detectors or arrays of 5 detectors, with about the same total number of detectors in each case - see below for detector layouts.
 
-We consider scenarios in which the half-normal detection function range parameter $\sigma$ is either `r sigma[1]`m or `r sigma[2]`m.
+We consider scenarios with either the half-normal detection function range parameter $\sigma$ is either `r sigma[1]`m or `r sigma[2]`m, or the hazard half-normal detection function with parameters ($\lambda_0=`r l0[1]`$, $\sigma=`r sigma[1]`$) or  ($\lambda_0=`r l0[2]`$, $\sigma=`r sigma[2]`$)
 
-To evaluate the designs, we look at the bias and the std. deviation of estimates of total number of calls.
+To evaluate the designs, we look at the bias and the std. deviation of estimates of density of calls and of $\sigma$.
 
 # 7-array simulations
 
 The key parameter values are as follows:
 
 * $\sigma = `r sigma[1]`$,
-* $g0 = `r g0`$,
+* $g0 = `r g0`$ (for half-normal) OR $\lambda_0 = `r l0[1]`$ (for hazard half-normal). 
 * The surface area of the area around a single array is `r A`,
 * The number of 7-element arrays used is `r narrays`,
 * The total number of animals across all arrays $N = `r N`$,
@@ -110,7 +130,15 @@ The key parameter values are as follows:
 * The mask buffer is `r buffer`,
 * The number of simulations is `r nsim`.
 
-Let's take a look at the traps:
+Let's take a look at the detecton functions:
+
+```{r detfunplot, fig.dim=c(6,4), echo=FALSE}
+d = seq(0,2500,length=100)
+detectfnplot(detfun,pars=detpar[[1]],xval=d,ylim=c(0,1),ylab="p(detect)")
+detectfnplot(detfun,pars=detpar[[2]],xval=d,add=TRUE,lty=2)
+```
+
+And take a look at the traps:
 
 ```{r traplot, fig.dim=c(6,6), echo=FALSE}
 ntraps = dim(traps7)[1]
@@ -131,7 +159,7 @@ Captures for all arrays:
 
 ```{r plotcapts1, fig.dim=c(6,6), echo=FALSE}
 signo = 1
-ch = sim.capthist(traps=traps7, popn=popn, detectfn=0, detectpar=list(g0=1, sigma=sigma[signo]),
+ch = sim.capthist(traps=traps7, popn=popn, detectfn=detfun, detectpar=detpar[[signo]],
                   noccasions=ncalls, nsessions=1, renumber=FALSE)
 plot.ch(ch,traps7,popn,
         main=paste("All arrays, 7-element array, sigma=",sigma[signo],"; ",ncalls," calls per animal.",sep=""))
@@ -159,7 +187,7 @@ All arrays:
 
 ```{r plotcapts2, fig.dim=c(6,6), echo=FALSE}
 signo = 2
-ch = sim.capthist(traps=traps7, popn=popn, detectfn=0, detectpar=list(g0=1, sigma=sigma[signo]),
+ch = sim.capthist(traps=traps7, popn=popn, detectfn=detfun, detectpar=detpar[[signo]],
                   noccasions=ncalls, nsessions=1, renumber=FALSE)
 plot.ch(ch,traps7,popn,
         main=paste("All arrays, 7-element array, sigma=",sigma[signo],"; ",ncalls," calls per animal.",sep=""))
@@ -184,7 +212,7 @@ for(signo in 1:nsigma) {
     # Simulate a population with a fixed number of animals
     popn = sim.popn(mask=mask, D=D, Ndist="fixed", model2D="even", core=attributes(mask)$boundingbox, buffer=0)
     # Simulate detection histories based on the simulated population
-    ch = sim.capthist(traps=traps7, popn=popn, detectfn=0, detectpar=list(g0=1, sigma=sigma[signo]),
+    ch = sim.capthist(traps=traps7, popn=popn, detectfn=detfun, detectpar=detpar[[signo]],
                            noccasions=5, nsessions=1) 
     fit = secr.fit(ch,mask=mask,fixed=list(g0=1),trace=FALSE)
     fitsum = summary(fit)
@@ -240,7 +268,7 @@ Ncall = N*ncalls
 The key parameter values are as follows:
 
 * $\sigma = `r sigma[2]`$,
-* $g0 = `r g0`$,
+* $g0 = `r g0`$ (for half-normal) OR $\lambda_0 = `r l0[2]`$ (for hazard half-normal). 
 * The surface area of the area around a single array is `r A`,
 * The number of 5-element arrays used is `r narrays`,
 * The total number of animals across all arrays $N = `r N`$,
@@ -273,7 +301,7 @@ Look at captures over all arrays
 
 ```{r plotcapts15, fig.dim=c(6,6), echo=FALSE}
 signo = 1
-ch = sim.capthist(traps=traps5, popn=popn, detectfn=0, detectpar=list(g0=1, sigma=sigma[signo]),
+ch = sim.capthist(traps=traps5, popn=popn, detectfn=detfun, detectpar=detpar[[signo]],
                   noccasions=ncalls, nsessions=1, renumber=FALSE)
 plot.ch(ch,traps5,popn,
         main=paste("All arrays, 5-element array, sigma=",sigma[signo],"; ",ncalls," calls per animal.",sep=""))
@@ -302,7 +330,7 @@ All arrays:
 
 ```{r plotcapts25, fig.dim=c(6,6), echo=FALSE}
 signo = 2
-ch = sim.capthist(traps=traps5, popn=popn, detectfn=0, detectpar=list(g0=1, sigma=sigma[signo]),
+ch = sim.capthist(traps=traps5, popn=popn, detectfn=detfun, detectpar=detpar[[signo]],
                   noccasions=ncalls, nsessions=1, renumber=FALSE)
 plot.ch(ch,traps5,popn,
         main=paste("All arrays, 5-element array, sigma=",sigma[signo],"; ",ncalls," calls per animal.",sep=""))
@@ -325,7 +353,7 @@ for(signo in 1:nsigma) {
     # Simulate a population with a fixed number of animals
     popn = sim.popn(mask=mask, D=D, Ndist="fixed", model2D="even", core=attributes(mask)$boundingbox, buffer=0)
     # Simulate detection histories based on the simulated population
-    ch = sim.capthist(traps=traps7, popn=popn, detectfn=0, detectpar=list(g0=1, sigma=sigma[signo]),
+    ch = sim.capthist(traps=traps7, popn=popn, detectfn=detfun, detectpar=detpar[[signo]],
                            noccasions=5, nsessions=1) 
     fit = secr.fit(ch,mask=mask,fixed=list(g0=1),trace=FALSE)
     fitsum = summary(fit)
